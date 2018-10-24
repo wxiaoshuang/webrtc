@@ -59,9 +59,19 @@
         <video autoplay playsinline  ref="localVideo" controls id="local-video"></video>
       </div>
       <div>
-        <video autoplay playsinline ref="remoteVideo1"></video>
-        <video autoplay playsinline ref="remoteVideo2"></video>
+        <video autoplay playsinline ref="remoteVideo1" controls></video>
+        <video autoplay playsinline ref="remoteVideo2" controls></video>
+        <video autoplay playsinline ref="remoteVideo3" controls></video>
       </div>
+    </div>
+    <div>
+      <h4>列表渲染</h4>
+      <ul>
+        <li v-for="(item, index) in biPeersList" :key="index">
+          <h4>{{item.other.username}}</h4>
+          <video autoplay playsinline  controls :srcObject="item.remoteStream"></video>
+        </li>
+      </ul>
     </div>
   </div>
 </template>
@@ -82,8 +92,9 @@
           offerToReceiveVideo: 1
         },
         biPeersList:[],
-        localPc: null,
+        pc: null,
         localPc1: null,
+        localPc2: null,
         pcMsgTo: {},
         remotePc: null,
         isStarted: false,
@@ -98,6 +109,7 @@
         localVideo: null,
         remoteVideo1: null,
         remoteVideo2: null,
+        remoteVideo3: null,
         localStream: null,
         remoteStream: null,
         remoteStreamNum: 0,
@@ -114,7 +126,7 @@
       // creates local MediaStream.
       startAction(callback) {
         navigator.mediaDevices.getUserMedia(this.mediaStreamConstraints).then((stream) => {
-          this.gotLocalMediaStream(stream, callback)
+          this.gotLocalMediaStream(stream,callback)
         }).catch(this.handleLocalMediaStreamError)
       },
       gotLocalMediaStream(stream, callback) {
@@ -130,12 +142,13 @@
       },
       handleRemoteMediaStreamAdded(event) {
         console.log('Remote stream  add event', event);
+        event.target.remoteStream = event.stream;
         if (this.remoteStreamNum <= 1) {
             this.remoteStreamNum++;
             this['remoteVideo'+ this.remoteStreamNum].srcObject = event.stream;
         }
         // this.remoteStream = event.stream;
-        this.trace('Received remote stream. from '+ event.target.username);
+        this.trace('Received remote stream. from '+ event.target);
       },
       handleRemoteStreamRemoved(event) {
         console.log('Remote stream  removed event', event);
@@ -145,62 +158,62 @@
         let to = this.pcMsgTo;
         this.socket.emit('pc message', {from, to, pcMsg: PcMessage});
       },
+      // A和B建立连接，A和C建立连接，收到的B和C的消息需要进行区分
       signalingMessageCallback(message) {
+        let otherId = message.from.userId; // 对方的id
+        let pcArr = this.biPeersList.filter(v => v.other.userId = otherId);
+        if(!pcArr.length) {
+          return;
+        }
+        let pc = pcArr[0];
         message = message.pcMsg;
         if (message.type === 'offer') {
           console.log('signalingMessageCallback offer', message);
-          this.localPc.setRemoteDescription(new RTCSessionDescription(message)).then(() => {
-            this.createAnswer()
+          pc.setRemoteDescription(new RTCSessionDescription(message)).then(() => {
+            pc.createAnswer()
+              .then((description) => this.createdAnswerSuccess(pc,description))
+              .catch(this.setSessionDescriptionError);
           }).catch(this.logError)
         } else if (message.type === 'answer') {
           console.log('收到了answer')
-          this.localPc.setRemoteDescription(new RTCSessionDescription(message), function () {
+          pc.setRemoteDescription(new RTCSessionDescription(message), function () {
           }, this.logError)
         } else if (message.type === 'candidate') {
           let candidate = new RTCIceCandidate({
             sdpMLineIndex: message.label,
             candidate: message.candidate
           });
-          this.localPc.addIceCandidate(candidate);
+          pc.addIceCandidate(candidate);
         }
       },
       //收到远端offer,创建answer
-      createAnswer() {
-        this.localPc.createAnswer()
-          .then(this.createdAnswerSuccess)
-          .catch(this.setSessionDescriptionError);
+      createAnswer(pc) {
       },
-      createdAnswerSuccess(description) {
-        this.localPc.setLocalDescription(description).then(() => {
-          this.sendPcMessage(this.localPc.localDescription);
+      createdAnswerSuccess(pc,description) {
+        pc.setLocalDescription(description).then(() => {
+          this.sendPcMessage(pc.localDescription);
           this.setLocalDescriptionSuccess(description, 'answer');
           this.trace('local answer psd set.');
         }).catch(this.setSessionDescriptionError);
       },
-      createPc(isCreatedOffer,data) {
-          if (!this.biPeersList.length || (this.biPeersList.length && this.biPeersList.some(v => v.other.userId === other.userId) )) {
-            let localPc = new RTCPeerConnection(this.pcConfig);
-            localPc.from = data.from;
-            localPc.to = data.to;
-            localPc.isSelf = isCreatedOffer; // 是否是自己发起
-            localPc.other = isCreatedOffer? data.to: data.from; // 对方
-            this.biPeersList.push(localPc);
-          } else {
-             return false;
-          }
-      },
       // 创建对等连接
       createPeerConnection(isCreatedOffer, data) {
-        let pc = this.createPc(isCreatedOffer, data);
-        if(!pc) {
+        let other = isCreatedOffer? data.to: data.from;
+        if (!this.biPeersList.length || (this.biPeersList.length && this.biPeersList.every(v => v.other.userId !== other.userId) )) {
+          let pc = new RTCPeerConnection(this.pcConfig);
+          pc.from = data.from;
+          pc.to = data.to;
+          pc.isSelf = isCreatedOffer; // 是否是自己发起
+          pc.other = isCreatedOffer? data.to: data.from; // 对方
+          this.biPeersList.push(pc);
+        } else {
           return;
         }
-        this.localPc = this.biPeersList[this.biPeersList.length - 1];
-        this.localPc.addEventListener('icecandidate', event => {
+        let n = this.biPeersList.length - 1;
+        this.biPeersList[n].addEventListener('icecandidate', event => {
           console.log('icecandidate event:', event);
           if (event.candidate) {
             this.sendPcMessage({
-              from: {userId: this.socket.id, username: this.form.username},
               type: 'candidate',
               label: event.candidate.sdpMLineIndex,
               id: event.candidate.sdpMid,
@@ -211,26 +224,28 @@
           }
         })
         if (this.localStream) {
-          this.localPc.addStream((this.localStream));
+          this.biPeersList[n].addStream((this.localStream));
         } else {
-          this.startAction(this.addStreamToLocalPc)
+          this.startAction(this.addStreamToLocalPc(this.biPeersList[n]))
         }
-        this.localPc.addEventListener('addstream', this.handleRemoteMediaStreamAdded);
-        this.localPc.addEventListener('removestream', this.handleRemoteStreamRemoved)
+        this.biPeersList[n].addEventListener('addstream', this.handleRemoteMediaStreamAdded);
+        this.biPeersList[n].addEventListener('removestream', this.handleRemoteStreamRemoved)
         // 创建offer,生成本地会话描述,如果是视频接收方，不需要生成offer
         if(isCreatedOffer) {
-          this.localPc.createOffer(this.offerOptions).then(this.createdOfferSuccess).catch(this.logError);
+          this.biPeersList[n].createOffer(this.offerOptions).then((description) => this.createdOfferSuccess(this.biPeersList[n], description)).catch(this.logError);
         }
       },
-      addStreamToLocalPc() {
-        this.localPc.addStream((this.localStream));
+      addStreamToLocalPc(pc) {
+        return () => {
+          pc.addStream((this.localStream));
+        }
       },
       // 创建offer,生成本地会话描述
-      createdOfferSuccess(description) {
+      createdOfferSuccess(pc,description) {
         // 用sd生成localPc的本地描述，remotePc的远程描述
-        this.localPc.setLocalDescription(description)
+        pc.setLocalDescription(description)
           .then(() => {
-            this.sendPcMessage(this.localPc.localDescription);
+            this.sendPcMessage(pc.localDescription);
             this.setLocalDescriptionSuccess(description, 'offer');
             this.trace('local offer psd set.');
           }).catch(this.setSessionDescriptionError);
@@ -357,6 +372,7 @@
         this.localVideo = this.$refs.localVideo;
         this.remoteVideo1 = this.$refs.remoteVideo1;
         this.remoteVideo2 = this.$refs.remoteVideo2;
+        this.remoteVideo3 = this.$refs.remoteVideo3;
       },
       trace(text, data = '') {
         text = text.trim();
@@ -388,7 +404,12 @@
   .info {
     width: 400px;
   }
-
+  .web-rtc {
+    width: 320px;
+  }
+  .web-rtc video {
+    width: 100%;
+  }
   #chat {
     width: 400px;
     height: 400px;
