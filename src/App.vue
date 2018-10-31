@@ -281,8 +281,16 @@
       },
       // 开始互动
       interact(user) {
-        this.socket.emit('interact', {from: {username: this.form.username, userId: this.socket.id}, to: user})
-        this.trace(`${this.form.username}向${user.username}发起了视频互动的请求`);
+        // 开启互动之前,需要先开启视频采集
+        if(!this.localStream) {
+            this.startAction(() => {
+              this.socket.emit('interact', {from: {username: this.form.username, userId: this.socket.id}, to: user})
+              this.trace(`${this.form.username}向${user.username}发起了视频互动的请求`);
+            })
+        } else {
+          this.socket.emit('interact', {from: {username: this.form.username, userId: this.socket.id}, to: user})
+          this.trace(`${this.form.username}向${user.username}发起了视频互动的请求`);
+        }
       },
       // 禁言
       forbidTalk() {
