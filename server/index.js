@@ -27,7 +27,6 @@ io.on('connection', function (socket) {
   })
   // 收到对等连接创建的消息
   socket.on('pc message', function(data) {
-    console.log('收到了对等连接的消息', data);
     socket.to(data.to.userId).emit('pc message',data)
     // socket.broadcast.to(room).emit('pc message', data);
   })
@@ -38,13 +37,34 @@ io.on('connection', function (socket) {
   // 对方同意视频互动
   socket.on('agree interact', function(data) {
     socket.to(data.from.userId).emit('agree interact',data)
+    // 更新互动的状态
+    // clients = clients.map(v => {
+    //   if (v.userId === data.from.userId || v.userId === data.to.userId) {
+    //     return {...v, isLive: true}
+    //   } else {
+    //     return v;
+    //   }
+    // })
+    // io.sockets.in(room).emit('clients',clients);
   })
   socket.on('refuse interact', function(data) {
     socket.to(data.from.userId).emit('refuse interact',data)
   })
-  socket.on('leave', function() {
+  socket.on('stop interact', function(data) {
+    socket.to(data.to.userId).emit('stop interact',data)
+    // // 更新互动的状态
+    // clients = clients.map(v => {
+    //   if (v.userId === data.from.userId || v.userId === data.to.userId) {
+    //     return {...v, isLive: true}
+    //   } else {
+    //     return v;
+    //   }
+    // })
+    // io.sockets.in(room).emit('clients',clients);
+  })
+  socket.on('leave', function(data) {
     socket.emit('left');
-    socket.broadcast.to(room).emit('leave',{username});
+    socket.broadcast.to(room).emit('leave',{userId: socket.id, username });
     clients = clients.filter(v => v.userId !== socket.id);
     io.sockets.in(room).emit('clients',clients);
   })

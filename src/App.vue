@@ -44,8 +44,12 @@
               <li v-for="(item ,index) in onlineClients" :key="index">
                 <div>
                   <span>{{item.username}}</span>
-                  <el-button type="text" size="mini" v-if="isTeacher" @click="interact(item)">互动</el-button>
-                  <el-button type="text" size="mini" v-if="isTeacher" @click="forbidTalk">禁言</el-button>
+                  <el-button v-if="item.userId !== socket.id && isTeacher" type="text" size="mini"
+                             @click="interact(item)" :disabled="getStatus(item)">互动
+                  </el-button>
+                  <el-button v-if="item.userId !== socket.id && isTeacher" type="text" size="mini" @click="forbidTalk">
+                    禁言
+                  </el-button>
                 </div>
               </li>
             </ul>
@@ -56,20 +60,18 @@
     <div class="web-rtc">
       <div>
         <h4>本人</h4>
-        <video autoplay playsinline  ref="localVideo" controls id="local-video"></video>
-      </div>
-      <div>
-        <video autoplay playsinline ref="remoteVideo1" controls></video>
-        <video autoplay playsinline ref="remoteVideo2" controls></video>
-        <video autoplay playsinline ref="remoteVideo3" controls></video>
+        <video autoplay playsinline ref="localVideo" controls id="local-video"></video>
       </div>
     </div>
     <div>
       <h4>列表渲染</h4>
-      <ul>
+      <ul class="others">
         <li v-for="(item, index) in biPeersList" :key="index">
-          <h4>{{item.other.username}}</h4>
-          <video autoplay playsinline  controls :srcObject="item.remoteStream"></video>
+          <h4>{{item.other.username}}
+            <el-button type="primary" @click="stopInteract(item, index)" style="float:right;">结束互动</el-button>
+          </h4>
+          <video autoplay playsinline controls :ref="'remoteVideo'+item.other.userId"
+                 :id="'remoteVideo'+item.other.userId"></video>
         </li>
       </ul>
     </div>
@@ -84,14 +86,15 @@
     data() {
       return {
         pcConfig: {
-          'iceServers': [{
-            'urls': 'stun:stun.l.google.com:19302'
-          }]
+          'iceServers': [
+            {'urls': 'stun:stun.l.google.com:19302'},
+            {'urls': 'turn:numb.viagenie.ca:3478', username: "REMOVED", credential: "REMOVED"}]
         },
         offerOptions: {
           offerToReceiveVideo: 1
         },
-        biPeersList:[],
+        biPeersList: [],
+        peerList: Object.create(null),
         pc: null,
         localPc1: null,
         localPc2: null,
@@ -123,14 +126,17 @@
       };
     },
     methods: {
+      // 获取互动的状态
+      getStatus(item) {
+        return !!this.peerList[item.userId]
+      },
       // creates local MediaStream.
       startAction(callback) {
         navigator.mediaDevices.getUserMedia(this.mediaStreamConstraints).then((stream) => {
-          this.gotLocalMediaStream(stream,callback)
+          this.gotLocalMediaStream(stream, callback)
         }).catch(this.handleLocalMediaStreamError)
       },
       gotLocalMediaStream(stream, callback) {
-        let localVideo = document.getElementById('local-video')
         this.localVideo = this.$refs.localVideo;
         this.localVideo.srcObject = stream;
         this.localStream = stream;
@@ -140,18 +146,22 @@
         }
         this.trace('Received local stream.');
       },
-      handleRemoteMediaStreamAdded(event) {
-        console.log('Remote stream  add event', event);
-        event.target.remoteStream = event.stream;
-        if (this.remoteStreamNum <= 1) {
-            this.remoteStreamNum++;
-            this['remoteVideo'+ this.remoteStreamNum].srcObject = event.stream;
-        }
-        // this.remoteStream = event.stream;
-        this.trace('Received remote stream. from '+ event.target);
+      handleRemoteMediaStreamAdded(pc, event) {
+        pc.remoteStream = event.stream;
+        let remoteVideo = this.$refs['remoteVideo' + pc.other.userId][0];
+        remoteVideo.srcObject = event.stream;
+        remoteVideo.addEventListener('loadedmetadata', () => {
+          remoteVideo.play();
+        })
+        console.log('biPeersList', this.biPeersList);
+        this.remoteStream = event.stream;
+        this.trace('Received remote stream from ' + pc.other.username);
       },
-      handleRemoteStreamRemoved(event) {
-        console.log('Remote stream  removed event', event);
+      handleLocalMediaStreamError() {
+        console.log('本地视频采集出错');
+      },
+      handleRemoteStreamRemoved(pc, event) {
+        this.trace('Remote stream  removed event', pc.other.username);
       },
       sendPcMessage(PcMessage) {
         let from = {userId: this.socket.id, username: this.form.username};
@@ -161,21 +171,18 @@
       // A和B建立连接，A和C建立连接，收到的B和C的消息需要进行区分
       signalingMessageCallback(message) {
         let otherId = message.from.userId; // 对方的id
-        let pcArr = this.biPeersList.filter(v => v.other.userId = otherId);
-        if(!pcArr.length) {
-          return;
-        }
-        let pc = pcArr[0];
+        let pc = this.peerList[otherId];
         message = message.pcMsg;
         if (message.type === 'offer') {
           console.log('signalingMessageCallback offer', message);
           pc.setRemoteDescription(new RTCSessionDescription(message)).then(() => {
             pc.createAnswer()
-              .then((description) => this.createdAnswerSuccess(pc,description))
+              .then((description) => this.createdAnswerSuccess(pc, description))
               .catch(this.setSessionDescriptionError);
           }).catch(this.logError)
         } else if (message.type === 'answer') {
           console.log('收到了answer')
+          console.log('pc', pc)
           pc.setRemoteDescription(new RTCSessionDescription(message), function () {
           }, this.logError)
         } else if (message.type === 'candidate') {
@@ -183,13 +190,12 @@
             sdpMLineIndex: message.label,
             candidate: message.candidate
           });
-          pc.addIceCandidate(candidate);
+          pc.addIceCandidate(candidate).catch(err => {
+            console.log('addIceCandidate-error', err)
+          });
         }
       },
-      //收到远端offer,创建answer
-      createAnswer(pc) {
-      },
-      createdAnswerSuccess(pc,description) {
+      createdAnswerSuccess(pc, description) {
         pc.setLocalDescription(description).then(() => {
           this.sendPcMessage(pc.localDescription);
           this.setLocalDescriptionSuccess(description, 'answer');
@@ -198,19 +204,20 @@
       },
       // 创建对等连接
       createPeerConnection(isCreatedOffer, data) {
-        let other = isCreatedOffer? data.to: data.from;
-        if (!this.biPeersList.length || (this.biPeersList.length && this.biPeersList.every(v => v.other.userId !== other.userId) )) {
+        let other = isCreatedOffer ? data.to : data.from; // 对方
+        if (!this.peerList[other.userId]) {
           let pc = new RTCPeerConnection(this.pcConfig);
           pc.from = data.from;
           pc.to = data.to;
           pc.isSelf = isCreatedOffer; // 是否是自己发起
-          pc.other = isCreatedOffer? data.to: data.from; // 对方
+          pc.other = isCreatedOffer ? data.to : data.from; // 对方
+          this.peerList[other.userId] = pc;
           this.biPeersList.push(pc);
-        } else {
-          return;
+          this.createConnect(isCreatedOffer, pc)
         }
-        let n = this.biPeersList.length - 1;
-        this.biPeersList[n].addEventListener('icecandidate', event => {
+      },
+      createConnect(isCreatedOffer, pc) {
+        pc.addEventListener('icecandidate', event => {
           console.log('icecandidate event:', event);
           if (event.candidate) {
             this.sendPcMessage({
@@ -224,15 +231,20 @@
           }
         })
         if (this.localStream) {
-          this.biPeersList[n].addStream((this.localStream));
+          pc.addStream((this.localStream));
         } else {
-          this.startAction(this.addStreamToLocalPc(this.biPeersList[n]))
+          this.startAction(this.addStreamToLocalPc(pc))
         }
-        this.biPeersList[n].addEventListener('addstream', this.handleRemoteMediaStreamAdded);
-        this.biPeersList[n].addEventListener('removestream', this.handleRemoteStreamRemoved)
+        pc.addEventListener('addstream', (event) => {
+          console.log('addstream');
+          this.handleRemoteMediaStreamAdded(pc, event)
+        });
+        pc.addEventListener('removestream', (event) => {
+          return this.handleRemoteStreamRemoved(pc, event)
+        })
         // 创建offer,生成本地会话描述,如果是视频接收方，不需要生成offer
-        if(isCreatedOffer) {
-          this.biPeersList[n].createOffer(this.offerOptions).then((description) => this.createdOfferSuccess(this.biPeersList[n], description)).catch(this.logError);
+        if (isCreatedOffer) {
+          pc.createOffer(this.offerOptions).then((description) => this.createdOfferSuccess(pc, description)).catch(this.logError);
         }
       },
       addStreamToLocalPc(pc) {
@@ -241,7 +253,7 @@
         }
       },
       // 创建offer,生成本地会话描述
-      createdOfferSuccess(pc,description) {
+      createdOfferSuccess(pc, description) {
         // 用sd生成localPc的本地描述，remotePc的远程描述
         pc.setLocalDescription(description)
           .then(() => {
@@ -300,9 +312,13 @@
           this.$message('请输入用户名')
           return
         }
+        if(this.onlineClients.some(v => v.username === this.form.username)) {
+          this.$message('用户已经加入')
+          return
+        }
         let v = this;
         this.socket = io.connect(url, {query: {username: this.form.username, room: 'hello'}});
-        // 其他用户加入
+        // 其他用户加入聊天室
         this.socket.on('join', (data) => {
           this.updateChatMessage({msg: data.username + '加入了聊天室', type: 'sys'})
         });
@@ -323,6 +339,10 @@
         // 别人离开了
         this.socket.on('leave', data => {
           this.updateChatMessage({msg: data.username + '离开了聊天室', type: 'sys'})
+          if (this.biPeersList[data.userId]) {
+            this.biPeersList[data.userId].close()
+            delete this.biPeersList[data.userId]
+          }
         })
         // 更新在线人数列表
         this.socket.on('clients', (data) => {
@@ -367,17 +387,40 @@
           this.$message({type: 'warning', message: `${data.to.username}拒绝了视频互动的请求`})
           this.trace(`${data.to.username}拒绝了视频互动的请求`);
         })
+        // 监听到对方结束互动
+        this.socket.on('stop interact', data => {
+          let part =  data.from
+          this.$message({type: 'info', message: `${part.username}停止了和您互动，连接即将断开`, duration: 1500})
+          console.log('this.biPeersList', this.biPeersList);
+          this.peerList[data.from.userId].close();
+          this.peerList[data.from.userId] = null;
+          let index = this.biPeersList.findIndex(v => v.other.userId === part.userId)
+          if (index > -1) {
+            this.biPeersList[index].close()
+            this.biPeersList.splice(index, 1)
+          }
+        })
+      },
+      stopInteract(item, index) {
+        this.socket.emit('stop interact', {from: {username: this.form.username, userId: this.socket.id}, to:item.other})
+        this.biPeersList.splice(index, 1)
+        this.peerList[item.other.userId].close();
+        this.peerList[item.other.userId] = null
       },
       init() {
         this.localVideo = this.$refs.localVideo;
-        this.remoteVideo1 = this.$refs.remoteVideo1;
-        this.remoteVideo2 = this.$refs.remoteVideo2;
-        this.remoteVideo3 = this.$refs.remoteVideo3;
       },
       trace(text, data = '') {
         text = text.trim();
         const now = (window.performance.now() / 1000).toFixed(3);
         console.log(now, text, data);
+      }
+    },
+    beforeDestroy() {
+      this.biPeersList = [];
+      for (let k in this.peerList) {
+        this.peerList[k].close();
+        this.peerList[k] = null;
       }
     },
     mounted() {
@@ -401,15 +444,28 @@
     margin-top: 60px;
   }
 
+  video {
+    width: 320px;
+    height: 240px;
+  }
+
+  .others li {
+    float: left;
+    margin-right: 20px;
+  }
+
   .info {
     width: 400px;
   }
+
   .web-rtc {
     width: 320px;
   }
+
   .web-rtc video {
     width: 100%;
   }
+
   #chat {
     width: 400px;
     height: 400px;
