@@ -5,11 +5,8 @@
   "author": "wxiaoshuang <2177367028@qq.com>",
   "private": true,
   "scripts": {
-    "dev": "webpack-dev-server --inline --progress --config build/webpack.dev.conf.js",
-    "start": "npm run dev",
-    "test": "npm run unit",
-    "lint": "eslint --ext .js,.vue src test/unit",
-    "build": "node build/build.js"
+    "build": "node build/build.js",
+    "start": "node index"
   },
   "dependencies": {
     "element-ui": "^2.4.8",

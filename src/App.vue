@@ -86,12 +86,20 @@
     data() {
       return {
         pcConfig: {
-          'iceServers': [
-            {'urls': 'stun:stun.l.google.com:19302'},
-            {'urls': 'turn:numb.viagenie.ca:3478', username: "REMOVED", credential: "REMOVED"}]
+          "iceServers": [
+            {
+              "url": "stun:stun.l.google.com:19302"
+            },
+            {
+              "url": "turn:120.77.253.101:3478",
+              "username": "inter_user",
+              "credential": "power_turn"
+            }
+          ]
         },
         offerOptions: {
-          offerToReceiveVideo: 1
+          offerToReceiveVideo: 1,
+          offerToReceiveAudio: 1
         },
         biPeersList: [],
         peerList: Object.create(null),
@@ -117,7 +125,8 @@
         remoteStream: null,
         remoteStreamNum: 0,
         mediaStreamConstraints: {
-          video: true
+          video: true,
+          audio: true
         },
         form: {
           username: '',
@@ -315,7 +324,7 @@
         this.socket.emit('leave')
       },
       joinRoom() {
-        let url = 'http://localhost:9000'
+        let url = window.location.origin
         if (!this.form.username) {
           this.$message('请输入用户名')
           return
