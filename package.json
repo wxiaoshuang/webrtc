@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "build": "node build/build.js",
-    "start": "node index"
+    "start": "node index",
+    "dev": "webpack-dev-server --inline --progress --config build/webpack.dev.conf.js"
   },
   "dependencies": {
     "element-ui": "^2.4.8",
