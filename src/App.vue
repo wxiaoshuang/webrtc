@@ -13,11 +13,12 @@
         <el-button type="primary" @click="leaveRoom" size="small" :disabled="!(socket && socket.connected)">离开聊天室
         </el-button>
         <el-button type="primary" @click="startAction" size="small"
-                   :disabled="!(socket && socket.connected && isReady)">开始视频
+                   :disabled="!(socket && socket.connected && isReady)">开始采集本地视频
         </el-button>
       </el-form>
     </div>
     <div class="scene">
+      <head>在线聊天室</head>
       <div id="chat" v-show="socket && socket.connected">
         <el-tabs v-model="activeTab" @tab-click="tabClick">
           <el-tab-pane label="聊天" name="chatTab">
@@ -42,7 +43,7 @@
           <el-tab-pane :label="'用户('+ onlineClients.length +')'" name="userTab">
             <ul class="clients-list">
               <li v-for="(item ,index) in onlineClients" :key="index">
-                <div>
+                <!-- <div> -->
                   <span>{{item.username}}</span>
                   <el-button v-if="item.userId !== socket.id && isTeacher" type="text" size="mini"
                              @click="interact(item)" :disabled="getStatus(item)">互动
@@ -50,7 +51,7 @@
                   <!-- <el-button v-if="item.userId !== socket.id && isTeacher" type="text" size="mini" @click="forbidTalk">
                     禁言
                   </el-button> -->
-                </div>
+                <!-- </div> -->
               </li>
             </ul>
           </el-tab-pane>
@@ -459,7 +460,8 @@ export default {
     -moz-osx-font-smoothing: grayscale;
     text-align: center;
     color: #2c3e50;
-    margin-top: 60px;
+    /* margin-top: 60px; */
+    padding:40px;
   }
 
   video {
@@ -487,6 +489,19 @@ export default {
   #chat {
     width: 400px;
     height: 400px;
-    border: 1px solid yellow;
+    padding: 20px;
+    margin-top:20px;
+    border: 1px solid #ccc;
+  }
+  .clients-list {
+    margin:0;
+    padding:0;
+  }
+  .clients-list li{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px dashed #ccc;
+    padding: 10px 0;
   }
 </style>
